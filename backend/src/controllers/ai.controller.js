@@ -7,6 +7,7 @@ import { access } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import cloudinary from 'cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,6 +22,13 @@ if (!GEMINI_API_KEY) {
 
 const genAI = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 const uploadsDir = path.join(__dirname, "../../uploads");
+
+// Cloudinary config
+cloudinary.v2.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 try {
   await mkdir(uploadsDir, { recursive: true });
@@ -73,15 +81,25 @@ export const generatePost = async (req, res) => {
       return res.status(500).json({ message: "No image data in response" });
     }
 
-    const filename = `image_${Date.now()}.png`;
-    const filepath = path.join(uploadsDir, filename);
+    // Upload to Cloudinary
     const buffer = Buffer.from(imageData, "base64");
-    await writeFile(filepath, buffer);
+    const uploadResult = await cloudinary.v2.uploader.upload_stream(
+      { resource_type: 'image', folder: 'streamify-ai' },
+      (error, result) => {
+        if (error) {
+          console.error('Cloudinary upload error:', error);
+          return res.status(500).json({ message: 'Failed to upload image to Cloudinary', error: error.message });
+        }
+        return res.json({
+          mediaUrl: result.secure_url,
+          type: "image"
+        });
+      }
+    );
+    // Write buffer to stream
+    const stream = uploadResult;
+    stream.end(buffer);
 
-    return res.json({
-      mediaUrl: `/uploads/${filename}`,
-      type: "image"
-    });
   } catch (err) {
     console.error("❌ Error:", err.message);
     return res.status(500).json({
